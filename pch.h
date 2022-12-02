@@ -13,6 +13,7 @@
 #include <tchar.h>
 
 //
+#include <TlHelp32.h>
 #include <shellapi.h>
 #pragma comment(lib, "shell32")
 

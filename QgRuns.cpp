@@ -6,14 +6,17 @@ struct Arguments
 {
 	int interval;
 	bool test_mode;
+	bool no_check;
 
 	std::vector<std::wstring> files;
 
 	HINSTANCE _instance;
 	std::map<int, std::wstring> _strs;
 
+	std::vector<std::wstring> _prcs;
+
 	Arguments(HINSTANCE instance)
-		: interval(500), test_mode(false)
+		: interval(500), test_mode(false), no_check(false)
 		, _instance(instance)
 	{
 		_strs[IDS_APP] = load_resource_string(IDS_APP, instance);
@@ -68,6 +71,10 @@ struct Arguments
 		{
 			test_mode = true;
 		}
+		else if (cmd == L"nocheck")
+		{
+			no_check = true;
+		}
 		else if (cmd == L"interval")
 		{
 			if (eq == std::string::npos)
@@ -88,8 +95,38 @@ struct Arguments
 		return true;
 	}
 
+	/*private*/ void ____ProcessList()
+	{
+		HANDLE h = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+
+		PROCESSENTRY32 pe = { .dwSize = sizeof(PROCESSENTRY32) };
+		if (!Process32First(h, &pe))
+		{
+			CloseHandle(h);
+			return;
+		}
+
+		do {
+			_prcs.push_back(pe.szExeFile);
+		} while (Process32Next(h, &pe));
+
+		CloseHandle(h);
+	}
+
 	/*private*/ void ____ExecProc(const std::wstring& file)
 	{
+		if (!_prcs.empty())
+		{
+			auto slash = file.find_last_of(L"/\\");
+			if (slash != std::wstring::npos)
+			{
+				auto fname = file.substr(slash + 1);
+				auto it = std::find(_prcs.begin(), _prcs.end(), fname);
+				if (it != _prcs.end())
+					return;
+			}
+		}
+
 		STARTUPINFO si = { sizeof(STARTUPINFO) };
 		PROCESS_INFORMATION pi = { NULL };
 
@@ -120,13 +157,16 @@ struct Arguments
 			for (auto i = 0; i < files.size(); i++)
 			{
 				auto& f = files[i];
-				const auto m{ std::format(L"{}#{}: {}", _strs[IDS_TEST], i+1, f) };
+				const auto m{ std::format(L"{}#{}: {}", _strs[IDS_TEST], i + 1, f) };
 				MsgBox(m);
 			}
 
 			return;
 		}
-		
+
+		if (!no_check)
+			____ProcessList();
+
 		for (auto& f : files)
 			____ExecProc(f);
 	}
@@ -139,7 +179,7 @@ int APIENTRY wWinMain(
 	_In_ LPWSTR    lpCmdLine,
 	_In_ int       nCmdShow)
 {
-    UNREFERENCED_PARAMETER(hPrevInstance);
+	UNREFERENCED_PARAMETER(hPrevInstance);
 	UNREFERENCED_PARAMETER(lpCmdLine);
 	UNREFERENCED_PARAMETER(nCmdShow);
 
