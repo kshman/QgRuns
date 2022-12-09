@@ -152,7 +152,6 @@
     <ResourceCompile Include="Resource.rc" />
   </ItemGroup>
   <ItemGroup>
-    <Image Include="purutu.ico" />
     <Image Include="small.ico" />
   </ItemGroup>
   <ItemGroup>
