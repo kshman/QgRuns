@@ -2,11 +2,31 @@
 #include "Resource.h"
 #include "supp.h"
 
+enum Commands
+{
+	CmdNone,
+	CmdRun,
+	CmdCopy,
+	CmdMove,
+	CmdMaxValue,
+};
+
+const wchar_t* c_command_string[] =
+{
+	L"NONE",
+	L"RUN",
+	L"COPY",
+	L"MOVE",
+	L"알 수 없는 명령",
+};
+
 struct Arguments
 {
+	Commands command;
 	int interval;
 	bool test_mode;
 	bool no_check;
+	bool silence;
 
 	std::vector<std::wstring> files;
 
@@ -15,12 +35,13 @@ struct Arguments
 
 	std::vector<std::wstring> _prcs;
 
-	Arguments(HINSTANCE instance)
-		: interval(500), test_mode(false), no_check(false)
+	explicit Arguments(const HINSTANCE instance)
+		: command(CmdNone), interval(500), test_mode(false), no_check(false), silence(false)
 		, _instance(instance)
 	{
 		_strs[IDS_APP] = load_resource_string(IDS_APP, instance);
 		_strs[IDS_TEST] = load_resource_string(IDS_TEST, instance);
+		_strs[IDS_CURMODE] = load_resource_string(IDS_CURMODE, instance);
 	}
 
 	void ParseArgs()
@@ -28,44 +49,55 @@ struct Arguments
 		ParseArgs(__argc, __wargv);	// stdlib.h
 	}
 
-	void ParseArgs(int argc, wchar_t* argv[])
+	void ParseArgs(const int argc, wchar_t* argv[])
 	{
-		for (auto i = 1; i < argc; i++)
+		if (argc < 2)
+			return;
+
+		auto start = 2;
+		if (!_test_command(argv[1]))
+			start = 1;
+
+		for (auto i = start; i < argc; i++)
 		{
-			auto s = trim(argv[i]);;
+			auto s = trim_string(argv[i]);
 			if (s.size() < 2)
 				continue;
-			if (!____TestOption(s))
-				____AddIfExist(s);
+			if (!_test_option(s))
+				_add_file(s);
 		}
 	}
 
-	void MsgBox(int ids)
+	void MsgBox(const int ids)
 	{
-		auto msg = load_resource_string(ids);
-		MessageBox(NULL, msg.c_str(), _strs[IDS_APP].c_str(), MB_OK);
+		if (silence)
+			return;
+		const auto msg = load_resource_string(ids);
+		MessageBox(nullptr, msg.c_str(), _strs[IDS_APP].c_str(), MB_OK);
 	}
 
 	void MsgBox(const std::wstring& ss)
 	{
-		MessageBox(NULL, ss.c_str(), _strs[IDS_APP].c_str(), MB_OK);
+		if (silence)
+			return;
+		MessageBox(nullptr, ss.c_str(), _strs[IDS_APP].c_str(), MB_OK);
 	}
 
-	/*private*/ void ____AddIfExist(const std::wstring& s)
+	/*private*/ void _add_file(const std::wstring& s)
 	{
-		if (!std::filesystem::exists(s))
+		if (command == CmdRun && !std::filesystem::exists(s))
 			return;
 
 		files.push_back(s);
 	}
 
-	/*private*/ bool ____TestOption(const std::wstring& s)
+	/*private*/ bool _test_option(const std::wstring& s)
 	{
 		if (s[0] != L'-')
 			return false;
 
-		auto eq = s.find(L'=');
-		auto cmd = eq != std::wstring::npos ? s.substr(1, eq - 1) : s.substr(1);
+		const auto eq = s.find(L'=');
+		const auto cmd = eq != std::wstring::npos ? s.substr(1, eq - 1) : s.substr(1);
 
 		if (cmd == L"test")
 		{
@@ -81,11 +113,15 @@ struct Arguments
 				interval = 100;
 			else
 			{
-				auto prm = s.substr(eq + 1);
+				const auto prm = s.substr(eq + 1);
 				interval = std::stoi(prm);
 				if (interval < 100)
 					interval = 100;
 			}
+		}
+		else if (cmd == L"silence")
+		{
+			silence = true;
 		}
 		else
 		{
@@ -95,9 +131,33 @@ struct Arguments
 		return true;
 	}
 
-	/*private*/ void ____ProcessList()
+	/*private*/ bool _test_command(const std::wstring& s)
 	{
-		HANDLE h = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+		const auto cmd = upper_string(s);
+
+		if (cmd == c_command_string[CmdRun])
+		{
+			command = CmdRun;
+			return true;
+		}
+		if (cmd == c_command_string[CmdCopy])
+		{
+			command = CmdCopy;
+			return true;
+		}
+		if (cmd == c_command_string[CmdMove])
+		{
+			command = CmdMove;
+			return true;
+		}
+
+		command = CmdRun;
+		return false;
+	}
+
+	/*private*/ void _process_list()
+	{
+		const HANDLE h = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
 
 		PROCESSENTRY32 pe = { .dwSize = sizeof(PROCESSENTRY32) };
 		if (!Process32First(h, &pe))
@@ -107,68 +167,104 @@ struct Arguments
 		}
 
 		do {
-			_prcs.push_back(pe.szExeFile);
+			_prcs.emplace_back(pe.szExeFile);
 		} while (Process32Next(h, &pe));
 
 		CloseHandle(h);
 	}
 
-	/*private*/ void ____ExecProc(const std::wstring& file)
+	/*private*/ void _exec_process(const std::wstring& file)
 	{
 		if (!_prcs.empty())
 		{
-			auto slash = file.find_last_of(L"/\\");
-			if (slash != std::wstring::npos)
+			if (const auto slash = file.find_last_of(L"/\\");
+				slash != std::wstring::npos)
 			{
-				auto fname = file.substr(slash + 1);
-				auto it = std::find(_prcs.begin(), _prcs.end(), fname);
-				if (it != _prcs.end())
+				const auto fname = file.substr(slash + 1);
+				if (const auto it = std::ranges::find(_prcs, fname);
+					it != _prcs.end())
 					return;
 			}
 		}
 
-		STARTUPINFO si = { sizeof(STARTUPINFO) };
-		PROCESS_INFORMATION pi = { NULL };
+		STARTUPINFO si = { sizeof(STARTUPINFO), };
+		PROCESS_INFORMATION pi = { nullptr, };
 
-		auto ret = CreateProcess(NULL, (LPWSTR)file.c_str(), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+		const auto ret = CreateProcess(nullptr, const_cast<LPWSTR>(file.c_str()), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi);
 		CloseHandle(pi.hProcess);
 		CloseHandle(pi.hThread);
 
 		if (!ret)
 		{
-			std::wstring r(L"프로세스 실패: " + file);
+			const std::wstring r(L"프로세스 실패: " + file);
 			OutputDebugString(r.c_str());
 		}
 
 		Sleep(interval);
 	}
 
-	bool CanRun()
+	/*private*/ void _do_run()
 	{
-		if (files.empty())
-			return false;
-		return true;
+		if (!no_check)
+			_process_list();
+
+		for (const auto& f : files)
+			_exec_process(f);
 	}
 
-	void Runs()
+	/*private*/ void _do_copy_move() const
+	{
+		if (files.size() != 2)
+			return;
+
+		const auto src = files[0].c_str();
+		const auto dst = files[1].c_str();
+
+		if (!std::filesystem::exists(src))
+			return;
+
+		if (command == CmdCopy)
+		{
+			// 복사
+			if (!CopyFile(src, dst, FALSE))
+			{
+				const auto m{ std::format(L"파일 복사 실패({}): {}", GetLastError(), src) };
+				OutputDebugString(m.c_str());
+			}
+		}
+		else
+		{
+			// 이동
+			constexpr DWORD flags = MOVEFILE_COPY_ALLOWED | MOVEFILE_REPLACE_EXISTING;
+			MoveFileEx(src, dst, flags);
+		}
+	}
+
+	void LetsDoIt()
 	{
 		if (test_mode)
 		{
-			for (auto i = 0; i < files.size(); i++)
-			{
-				auto& f = files[i];
-				const auto m{ std::format(L"{}#{}: {}", _strs[IDS_TEST], i + 1, f) };
-				MsgBox(m);
-			}
+			auto cmd = c_command_string[command < CmdMaxValue ? command : CmdMaxValue];
+			const auto cm{ std::format(L"{}: {}", _strs[IDS_CURMODE], cmd) };
+			MsgBox(cm);
 
+			auto n = 0;
+			for (auto& i : files)
+			{
+				const auto m{ std::format(L"{}#{}: {}", _strs[IDS_TEST], ++n, i) };
+				MsgBox(m);
+
+			}
 			return;
 		}
 
-		if (!no_check)
-			____ProcessList();
-
-		for (auto& f : files)
-			____ExecProc(f);
+		switch (command)  // NOLINT(clang-diagnostic-switch-enum)
+		{
+		case CmdRun: _do_run(); break;
+		case CmdCopy:
+		case CmdMove: _do_copy_move(); break;
+		default: break;
+		}
 	}
 };
 
@@ -183,13 +279,13 @@ int APIENTRY wWinMain(
 	UNREFERENCED_PARAMETER(lpCmdLine);
 	UNREFERENCED_PARAMETER(nCmdShow);
 
-	auto args = new Arguments(hInstance);
+	const auto args = new Arguments(hInstance);
 
 	args->ParseArgs();
-	if (args->CanRun())
-		args->Runs();
-	else
+	if (args->command == CmdNone)
 		args->MsgBox(IDS_STANDALONE);
+	else
+		args->LetsDoIt();
 
 	delete args;
 
@@ -198,4 +294,5 @@ int APIENTRY wWinMain(
 
 // 디버깅 인수:
 // "D:\APPL\ksh\DarkNamer.exe" "D:\APPL\ksh\DuTools.exe" -interval=200
-// "D:\FF14\act\Advanced Combat Tracker.exe" "D:\APPL\ffxiv\PrsView.exe" -interval=2000 -test
+// run "D:\FF14\act\Advanced Combat Tracker.exe" "D:\APPL\ffxiv\PrsView.exe" -interval=2000 -test
+// copy "D:\APPL\ksh\pwall.avi" "Z:\pwallcopy.avi" -silence

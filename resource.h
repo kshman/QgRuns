@@ -11,7 +11,10 @@
 #define IDS_STANDALONE                  106
 #define IDI_QGRUNS                      107
 #define IDI_PURUTU                      107
+#define IDS_NOCMD                       107
 #define IDI_SMALL                       108
+#define IDS_STRING108                   108
+#define IDS_CURMODE                     108
 #define IDC_QGRUNS                      109
 #define IDR_MAINFRAME                   128
 #define IDC_STATIC                      -1
